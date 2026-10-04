@@ -1,0 +1,22 @@
+api:
+  base_url: https://api.surplusintelligence.ai/v1
+  api_key_env: SURPLUS_API_KEY
+timeout_s: 600
+contestants:
+  - name: DeepSeek
+    model: deepseek-v4.1-flash
+    color: "#4D6BFE"
+    params: { max_tokens: 32000 }   # passed to the API verbatim
+  - name: Gemini
+    model: gemini-3.8-flash
+    color: "#34A853"
+    params: { max_tokens: 32000 }
+  - name: Luna
+    model: gpt-6-luna
+    color: "#E8A33D"
+    params: { max_tokens: 32000 }
+judge:
+  model: kimi-k3                    # no contestant from Moonshot; optional `api:` block gives the judge its own endpoint
+  params: { max_tokens: 4000 }
+# Models whose returned reasoning is their full chain of thought; others are labelled "summary".
+native_reasoning: [deepseek-v4.1-flash, glm-5.3-flash, mimo-v2.6-flash]

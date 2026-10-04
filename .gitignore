@@ -1,0 +1,10 @@
+.env
+config.yaml
+data/
+games/*
+!games/examples/
+__pycache__/
+.venv/
+stats.csv
+.pytest_cache/
+tests/screenshots/

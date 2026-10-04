@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JeopardyBench Replay</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231029a3'/%3E%3Ctext x='16' y='23' font-family='Arial Black,sans-serif' font-size='18' font-weight='900' text-anchor='middle' fill='%23f4c95d'%3E$%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: a game-show stage. Header rail → 6×5 board (or the open clue card in its place) → contestant podiums.
+   Single dark world on purpose: the studio is always lit the same way. */
+:root {
+  color-scheme: dark;
+  --stage: #060a2b;        /* studio floor */
+  --board: #1029a3;        /* board cell blue */
+  --board-hi: #2342d6;     /* picked / hover cell */
+  --seam: #02041a;         /* gaps between cells */
+  --panel: #0b1352;        /* clue card and podium surface */
+  --panel-2: #121c66;
+  --gold: #f4c95d;         /* dollar values, the one loud colour */
+  --ink: #eef0ff;
+  --muted: #a3aadb;
+  --faint: #5d66a8;
+  --right: #42d99b;
+  --wrong: #ff6577;
+  --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --step: 1;               /* playback speed multiplier, set from JS */
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--stage); color: var(--ink);
+  font: 14px/1.5 var(--mono);
+  background-image: radial-gradient(ellipse 80% 50% at 50% 0%, #142080 0%, transparent 70%);
+  background-attachment: fixed;
+}
+button, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.app { max-width: 1200px; margin: 0 auto; padding-inline: 16px; padding-block: 12px 24px; display: grid; gap: 14px; }
+
+/* header */
+.rail { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.brand { font-family: var(--display); font-weight: 900; font-size: 26px; letter-spacing: .04em; line-height: 1; }
+.brand b { color: var(--gold); font-weight: 900; }
+.round-label { font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.btn svg { display: block; }
+.btn { background: var(--panel); border: 1px solid var(--panel-2); border-radius: 6px; padding: 5px 10px; cursor: pointer; min-height: 32px; }
+.btn:hover { background: var(--panel-2); }
+.btn[aria-pressed="true"] { background: var(--gold); color: var(--seam); border-color: var(--gold); }
+.seg { display: inline-flex; }
+.seg .btn { border-radius: 0; }
+.seg .btn:first-child { border-radius: 6px 0 0 6px; }
+.seg .btn:last-child { border-radius: 0 6px 6px 0; }
+select.btn { padding-right: 6px; }
+.caption { min-height: 24px; font-size: 15px; color: var(--muted); text-align: center; }
+.caption strong { color: var(--ink); font-weight: 600; }
+
+/* board */
+.stage { position: relative; }
+.board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; background: var(--seam); padding: 4px; border-radius: 4px; }
+.cat, .cell { background: var(--board); display: grid; place-items: center; text-align: center; min-width: 0; }
+.cat { font-family: var(--display); font-weight: 800; text-transform: uppercase; letter-spacing: .03em; font-size: clamp(11px, 1.6vw, 18px); line-height: 1.05; padding: 10px 4px; min-height: 64px; text-wrap: balance; hyphens: auto; -webkit-hyphens: auto; overflow-wrap: break-word; }
+.cell { font-family: var(--display); font-weight: 900; color: var(--gold); font-size: clamp(18px, 3.4vw, 40px); aspect-ratio: 16 / 9; max-width: 100%; border: 0; cursor: default; text-shadow: 2px 2px 0 rgba(0,0,0,.45); transition: background .2s; }
+.cell.played { color: transparent; text-shadow: none; cursor: pointer; }
+.cell.played:hover { background: var(--board-hi); }
+.cell.picked { background: var(--board-hi); animation: pulse calc(.5s / var(--step)) ease-in-out 3 alternate; }
+@keyframes pulse { to { background: var(--gold); color: var(--seam); } }
+
+/* clue card */
+.card { background: var(--panel); border: 1px solid var(--panel-2); border-radius: 6px; display: grid; gap: 14px; padding: 18px clamp(14px, 3vw, 28px); }
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.card-subject { font-family: var(--display); font-weight: 800; font-size: clamp(22px, 3.2vw, 34px); text-transform: uppercase; letter-spacing: .03em; line-height: 1; }
+.card-value { font-family: var(--display); font-weight: 900; font-size: clamp(22px, 3.2vw, 34px); color: var(--gold); line-height: 1; }
+.tag { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--faint); border-radius: 99px; padding: 1px 8px; }
+.question { font-family: var(--serif); font-size: clamp(16px, 1.7vw, 19px); line-height: 1.55; max-height: 42vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 6px; max-width: 75ch; }
+.question math[display="block"] { overflow-x: auto; overflow-y: hidden; }
+.readbar { height: 4px; background: var(--seam); border-radius: 2px; overflow: hidden; }
+.readbar i { display: block; height: 100%; width: 100%; background: var(--gold); transform-origin: left; }
+.readbar.run i { animation: read linear forwards; }
+@keyframes read { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.splash { display: grid; place-items: center; min-height: 260px; text-align: center; gap: 8px; }
+.splash h2 { margin: 0; font-family: var(--display); font-weight: 900; font-size: clamp(40px, 9vw, 96px); line-height: .95; color: var(--gold); letter-spacing: .02em; text-transform: uppercase; text-wrap: balance; animation: pop calc(.6s / var(--step)) cubic-bezier(.2,1.6,.4,1); }
+.splash p { margin: 0; font-size: 16px; color: var(--muted); }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } }
+
+.answer-line { display: grid; gap: 10px; }
+.speech { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; background: var(--panel-2); border-radius: 6px; padding: 10px 14px; border-left: 4px solid var(--who, var(--muted)); }
+.speech .who { font-family: var(--display); font-weight: 800; font-size: 20px; text-transform: uppercase; }
+.speech .said { font-family: var(--serif); font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
+.stamp { font-family: var(--display); font-weight: 900; font-size: 22px; letter-spacing: .04em; padding: 2px 10px; border-radius: 4px; border: 2px solid currentColor; animation: pop calc(.4s / var(--step)) ease-out; white-space: nowrap; }
+.stamp.ok { color: var(--right); } .stamp.no { color: var(--wrong); }
+
+.reveal { display: grid; gap: 12px; }
+.truth { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.truth .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.truth .value { font-family: var(--serif); font-weight: 600; font-size: 20px; color: var(--gold); overflow-wrap: anywhere; min-width: 0; }
+details { background: var(--seam); border-radius: 6px; }
+details > summary { cursor: pointer; padding: 8px 12px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+details .body { padding: 0 12px 12px; font-family: var(--serif); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+.everyone { display: grid; gap: 6px; }
+.everyone h3 { margin: 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 10px; background: var(--panel-2); border-radius: 6px; }
+.row .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--who); }
+.row .main { min-width: 0; display: grid; gap: 2px; }
+.row .top { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.row .name { font-weight: 600; }
+.row .resp { font-family: var(--serif); font-size: 16px; overflow-wrap: anywhere; }
+.row .expl { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.row .meta { font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row .meta .ok { color: var(--right); } .row .meta .no { color: var(--wrong); }
+.row.uncounted { opacity: .78; }
+.row .think { grid-column: 2 / -1; }
+.row .think summary { padding: 4px 8px; }
+.row .think .body { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.warn { color: var(--gold); }
+
+/* podiums */
+.podiums { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.podium { position: relative; background: var(--panel); border-radius: 6px; padding: 12px 14px 12px; border-top: 5px solid var(--who); display: grid; gap: 4px; transition: box-shadow .3s, opacity .3s; min-width: 0; }
+.podium.control { box-shadow: 0 0 0 2px var(--gold); }
+.podium.dim { opacity: .45; }
+.podium.lit { box-shadow: 0 0 0 3px var(--who), 0 0 28px -4px var(--who); }
+.podium .pname { font-family: var(--display); font-weight: 800; font-size: 24px; text-transform: uppercase; line-height: 1; letter-spacing: .03em; }
+.podium .pmodel { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.podium .score { font-family: var(--display); font-weight: 900; font-size: 34px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.podium .score.neg { color: var(--wrong); }
+.podium .chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
+.chip { font-size: 11px; letter-spacing: .05em; padding: 1px 7px; border-radius: 99px; background: var(--seam); color: var(--muted); white-space: nowrap; }
+.chip.buzz { background: var(--who); color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.5); }
+.chip.ctl { background: var(--gold); color: var(--seam); }
+.chip.ok { background: var(--right); color: var(--seam); } .chip.no { background: var(--wrong); color: var(--seam); }
+.quip { font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--muted); min-height: 1.5em; overflow-wrap: anywhere; }
+.delta { position: absolute; right: 12px; top: 8px; font-family: var(--display); font-weight: 900; font-size: 22px; animation: rise calc(1.2s / var(--step)) ease-out forwards; }
+.delta.ok { color: var(--right); } .delta.no { color: var(--wrong); }
+@keyframes rise { from { transform: translateY(10px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(-8px); opacity: 0; } }
+
+/* end + load screens */
+.end h2 { margin: 0; font-family: var(--display); font-weight: 900; font-size: clamp(32px, 6vw, 60px); color: var(--gold); text-transform: uppercase; line-height: 1; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--panel-2); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 500; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.loader { display: grid; gap: 14px; justify-items: center; text-align: center; padding: 48px 16px; border: 2px dashed var(--faint); border-radius: 8px; }
+.loader.over { border-color: var(--gold); }
+.loader h2 { margin: 0; font-family: var(--display); font-weight: 900; font-size: 40px; text-transform: uppercase; }
+.loader p { margin: 0; max-width: 60ch; color: var(--muted); }
+.loader code { color: var(--ink); }
+.err { color: var(--wrong); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+@media (max-width: 640px) {
+  .brand { font-size: 22px; }
+  .board { gap: 2px; padding: 2px; }
+  .cat { min-height: 52px; padding: 6px 2px; font-size: 10px; letter-spacing: 0; }
+  .podium .score { font-size: 26px; }
+  .podium .pname { font-size: 19px; }
+  .podiums { grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 6px; }
+  .podium { padding: 8px 10px; }
+  .speech { grid-template-columns: 1fr auto; }
+  .speech .who { grid-column: 1 / -1; font-size: 16px; }
+  .speech .said { font-size: 16px; }
+  .row { grid-template-columns: 10px minmax(0, 1fr); }
+  .row .meta { grid-column: 2; text-align: left; white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="rail">
+    <div class="brand">JEOPARDY<b>BENCH</b></div>
+    <div class="round-label" id="roundLabel"></div>
+    <div class="controls" id="controls" hidden>
+      <button class="btn" id="prev" title="Previous clue (←)" aria-label="Previous clue"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2h2v12H3zM14 2v12L6 8z" fill="currentColor"/></svg></button>
+      <button class="btn" id="play" title="Play / pause (space)" aria-label="Pause"><span id="playIcon"></span></button>
+      <button class="btn" id="next" title="Next clue (→)" aria-label="Next clue"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M11 2h2v12h-2zM2 2v12l8-6z" fill="currentColor"/></svg></button>
+      <span class="seg" role="group" aria-label="Speed">
+        <button class="btn" data-speed="1" aria-pressed="true">1×</button>
+        <button class="btn" data-speed="2" aria-pressed="false">2×</button>
+        <button class="btn" data-speed="4" aria-pressed="false">4×</button>
+      </span>
+      <select class="btn" id="jump" aria-label="Jump to"></select>
+      <button class="btn" id="open" title="Load another game">Load…</button>
+    </div>
+    <input type="file" id="file" accept=".json,application/json" multiple hidden>
+  </header>
+  <div class="caption" id="caption" aria-live="polite"></div>
+  <main class="stage" id="stage"></main>
+  <section class="podiums" id="podiums" aria-label="Contestants"></section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js"></script>
+<script>
+"use strict";
+/* ---------- timeline (pure) -------------------------------------------------
+   buildTimeline(log) -> steps. Each step carries a full snapshot of what the screen
+   shows (scores, played cells, control), so seeking is just rendering a step. */
+const BASE = { title: 3.5, roundIntro: 2.6, pick: 1.8, ddSplash: 2.2, wager: 2.4, buzz: 2.4,
+               response: 2.6, verdict: 1.8, reveal: 6, finalIntro: 3, finalWagers: 2.2, end: 0 };
+
+function readSeconds(text) { return Math.min(15, Math.max(4, (text || "").length / 60)); }
+
+function buildTimeline(log) {
+  const steps = [];
+  const n = log.players.length;
+  let scores = new Array(n).fill(0);
+  let played = new Set();
+  let control = null, round = -1;
+  const snap = (extra) => ({ scores: scores.slice(), played: new Set(played), control, round, ...extra });
+  const push = (kind, extra = {}) => steps.push({ kind, dur: BASE[kind] ?? 2, ...snap(extra) });
+
+  push("title");
+  let lastPick = null;
+  log.events.forEach((e, ei) => {
+    if (e.type === "round_start") {
+      round = e.round; control = e.control; played = new Set();
+      push("roundIntro");
+    } else if (e.type === "pick") {
+      lastPick = e;
+    } else if (e.type === "clue") {
+      const key = `${e.round}:${e.row}:${e.col}`;
+      const clue = { ei, e, key };
+      const picker = lastPick ? lastPick.player : control;
+      push("pick", { clue, picker, fallback: !!(lastPick && lastPick.fallback) });
+      const q = log.questions[e.qid] || {};
+      if (e.daily_double) {
+        push("ddSplash", { clue, picker });
+        push("wager", { clue, picker });
+        push("read", { clue, dur: readSeconds(q.question) });
+        const p = e.dd.player, r = e.replies[p];
+        push("response", { clue, speaker: p });
+        scores[p] += r.verdict.correct ? e.wager : -e.wager;
+        push("verdict", { clue, speaker: p, delta: r.verdict.correct ? e.wager : -e.wager });
+      } else {
+        push("read", { clue, dur: readSeconds(q.question) });
+        push("buzz", { clue });
+        for (const p of e.buzz_order) {
+          const r = e.replies[p];
+          push("response", { clue, speaker: p });
+          scores[p] += r.verdict.correct ? e.value : -e.value;
+          if (r.verdict.correct) control = p;
+          push("verdict", { clue, speaker: p, delta: r.verdict.correct ? e.value : -e.value });
+          if (r.verdict.correct) break;
+        }
+      }
+      played.add(key);
+      control = e.control_after;
+      scores = e.scores_after.slice();   // trust the engine's numbers
+      push("reveal", { clue });
+      lastPick = null;
+    } else if (e.type === "final") {
+      round = "final";
+      const fin = { ei, e };
+      push("finalIntro", { fin });
+      if (!e.skipped) {
+        push("finalWagers", { fin });
+        push("read", { fin, dur: readSeconds((log.questions[e.qid] || {}).question) });
+        const order = e.qualifiers.slice().sort((a, b) => e.scores_before[a] - e.scores_before[b]);
+        for (const p of order) {
+          const r = e.replies[p];
+          push("response", { fin, speaker: p });
+          scores[p] += r.verdict.correct ? e.wagers[p] : -e.wagers[p];
+          push("verdict", { fin, speaker: p, delta: r.verdict.correct ? e.wagers[p] : -e.wagers[p], dur: 2.6 });
+        }
+        scores = e.scores_after.slice();
+        push("reveal", { fin });
+      }
+    }
+  });
+  push("end", { winners: log.result.winners });
+  return steps;
+}
+
+/* ---------- stats for the end screen (same definitions as stats.py) ---------- */
+function gameStats(log) {
+  return log.players.map((pl, i) => {
+    let seen = 0, right = 0, buzz = 0, buzzRight = 0, regular = 0, sealed = 0, fails = 0;
+    const confR = [], confW = [];
+    for (const e of log.events) {
+      if ((e.type !== "clue" && e.type !== "final") || e.skipped) continue;
+      const r = e.replies[i];
+      seen++; if (r.verdict.correct) right++;
+      if (r.error) fails++; else (r.verdict.correct ? confR : confW).push(r.confidence);
+      if (e.type === "clue") {
+        sealed += r.verdict.correct ? e.value : -e.value;
+        if (!e.daily_double) { regular++; if (r.buzz) { buzz++; if (r.verdict.correct) buzzRight++; } }
+      }
+    }
+    const avg = (a) => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null;
+    return { name: pl.name, model: pl.model, color: pl.color, score: log.result.scores[i],
+             accuracy: seen ? right / seen : null, buzzRate: regular ? buzz / regular : null,
+             buzzAcc: buzz ? buzzRight / buzz : null, sealed, confR: avg(confR), confW: avg(confW), fails };
+  });
+}
+
+/* ---------- rendering ---------- */
+const $ = (s) => document.querySelector(s);
+const ICON_PLAY = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 2h4v12H3zM9 2h4v12H9z" fill="currentColor"/></svg>';
+const S = { log: null, steps: [], i: 0, playing: false, speed: 1, timer: null,
+            reasoning: null, reasoningSrc: null, reasoningTried: false };
+
+function el(tag, attrs = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") node.className = v;
+    else if (k === "style") node.style.cssText = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) node.append(kid instanceof Node ? kid : String(kid));
+  return node;
+}
+const money = (v) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US");
+const pct = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+const who = (p) => `--who:${S.log.players[p].color}`;
+const pname = (p) => S.log.players[p].name;
+function math(node) {
+  if (window.renderMathInElement) {
+    try {
+      renderMathInElement(node, { throwOnError: false, output: "mathml", delimiters: [
+        { left: "$$", right: "$$", display: true }, { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false }, { left: "$", right: "$", display: false }] });
+    } catch (_) { /* leave plain text */ }
+  }
+  return node;
+}
+
+function roundName(step) {
+  if (step.round === "final") return "Final Jeopardy";
+  if (step.round === -1 || step.round == null) return "";
+  return S.log.rounds[step.round].name;
+}
+
+function render() {
+  const step = S.steps[S.i];
+  if (!step) return;
+  document.documentElement.style.setProperty("--step", S.speed);
+  $("#roundLabel").textContent = roundName(step);
+  $("#jump").value = jumpValueFor(S.i);
+  renderCaption(step);
+  renderStage(step);
+  renderPodiums(step);
+}
+
+function renderCaption(step) {
+  const c = $("#caption");
+  c.replaceChildren();
+  const e = step.clue && step.clue.e;
+  if (step.kind === "pick") {
+    c.append(el("strong", {}, pname(step.picker)), `: “${e.subject} for ${money(e.value)}”`,
+      step.fallback ? el("span", { class: "warn" }, "  (invalid pick, chosen at random)") : "");
+  } else if (step.kind === "roundIntro") {
+    c.append(el("strong", {}, pname(step.control)), " starts with control of the board");
+  } else if (step.kind === "buzz") {
+    const n = e.buzz_order.length;
+    c.append(n ? `${n} buzz${n > 1 ? "es" : ""}, ranked by confidence` : "Nobody buzzes in");
+  }
+}
+
+function renderBoard(step, r) {
+  const rnd = S.log.rounds[r];
+  const board = el("div", { class: "board", role: "grid", "aria-label": rnd.name + " board" });
+  rnd.subjects.forEach((s) => board.append(el("div", { class: "cat", role: "columnheader" }, s)));
+  const pickedKey = step.kind === "pick" ? step.clue.key : null;
+  for (let row = 0; row < rnd.values.length; row++) {
+    for (let col = 0; col < rnd.subjects.length; col++) {
+      const key = `${r}:${row}:${col}`;
+      const isPlayed = step.played.has(key);
+      const cls = "cell" + (isPlayed ? " played" : "") + (key === pickedKey ? " picked" : "");
+      const btn = el("button", { class: cls, role: "gridcell",
+        "aria-label": `${rnd.subjects[col]} ${money(rnd.values[row])}${isPlayed ? " (played, replay)" : ""}`,
+        tabindex: isPlayed ? 0 : -1, onclick: isPlayed ? () => replayClue(key) : null }, money(rnd.values[row]));
+      board.append(btn);
+    }
+  }
+  return board;
+}
+
+function clueHead(e, q, extra) {
+  return el("div", { class: "card-head" },
+    el("span", { class: "card-subject" }, e.subject),
+    e.value ? el("span", { class: "card-value" }, money(e.value)) : null,
+    extra,
+    q.category ? el("span", { class: "tag" }, q.category) : null,
+    q.answer_type ? el("span", { class: "tag" }, q.answer_type === "multipleChoice" ? "multiple choice" : "exact answer") : null);
+}
+
+function renderStage(step) {
+  const stage = $("#stage");
+  stage.replaceChildren();
+  const k = step.kind;
+  if (k === "title") {
+    stage.append(el("div", { class: "card splash" },
+      el("h2", {}, S.log.players.map((p) => p.name).join(" vs ")),
+      el("p", {}, `Seed ${S.log.seed} · ${S.log.rounds.length === 1 ? "short game" : "full game"} · judged by ${S.log.config.judge ? S.log.config.judge.model : "?"}`),
+      el("p", {}, "Questions from Humanity's Last Exam")));
+    return;
+  }
+  if (k === "roundIntro") {
+    stage.append(el("div", { class: "card splash" }, el("h2", {}, S.log.rounds[step.round].name),
+      el("p", {}, S.log.rounds[step.round].subjects.join(" · "))));
+    return;
+  }
+  if (k === "pick") { stage.append(renderBoard(step, step.round)); return; }
+  if (k === "end") { stage.append(renderEnd()); return; }
+
+  if (step.fin) { stage.append(renderFinal(step)); return; }
+  const e = step.clue.e, q = S.log.questions[e.qid] || {};
+  if (k === "ddSplash") {
+    stage.append(el("div", { class: "card splash" }, el("h2", {}, "Daily Double"),
+      el("p", {}, `${pname(step.picker)} found it in ${e.subject}`)));
+    return;
+  }
+  const card = el("div", { class: "card" });
+  const wagerTag = e.daily_double ? el("span", { class: "tag" }, `Daily Double · ${pname(e.dd.player)} wagers ${money(e.wager)}`) : null;
+  card.append(clueHead({ ...e, value: e.daily_double ? 0 : e.value }, q, wagerTag));
+  if (k === "wager") {
+    card.append(el("div", { class: "splash" },
+      el("h2", {}, money(e.wager)),
+      el("p", {}, `${pname(e.dd.player)} wagers (max ${money(e.dd.max_wager)})`),
+      e.dd.quip ? el("p", { class: "quip" }, `“${e.dd.quip}”`) : null));
+    stage.append(card);
+    return;
+  }
+  card.append(math(el("div", { class: "question" }, q.question || "")));
+  if (k === "read") {
+    const bar = el("div", { class: "readbar run" }, el("i", { style: `animation-duration:${step.dur / S.speed}s` }));
+    card.append(bar);
+    if (!S.playing) bar.classList.remove("run");
+  }
+  if (k === "response" || k === "verdict") card.append(speech(e.replies[step.speaker], step.speaker, k === "verdict"));
+  if (k === "reveal") card.append(renderReveal(e, q));
+  stage.append(card);
+}
+
+function speech(r, p, judged) {
+  return el("div", { class: "answer-line" }, el("div", { class: "speech", style: who(p) },
+    el("span", { class: "who" }, pname(p)),
+    el("span", { class: "said" }, r.response || "(no response)"),
+    judged ? el("span", { class: "stamp " + (r.verdict.correct ? "ok" : "no") }, r.verdict.correct ? "CORRECT" : "WRONG") : el("span")));
+}
+
+function renderReveal(e, q) {
+  const box = el("div", { class: "reveal" });
+  box.append(el("div", { class: "truth" }, el("span", { class: "label" }, "Correct response"),
+    math(el("span", { class: "value" }, q.answer || "?"))));
+  if (q.rationale) box.append(el("details", {}, el("summary", {}, "Why (from the question's author)"), math(el("div", { class: "body" }, q.rationale))));
+  box.append(everyone(e));
+  return box;
+}
+
+function everyone(e) {
+  const box = el("div", { class: "everyone" }, el("h3", {}, "Everyone's answers"));
+  e.replies.forEach((r, p) => {
+    const v = r.verdict || {};
+    const status = r.counted ? (r.buzz ? (e.daily_double || e.type === "final" ? "answered" : "buzzed") : "")
+                             : (r.buzz && e.type === "clue" && !e.daily_double ? "buzz not reached" : (e.type === "final" || e.daily_double ? "not playing (shadow answer)" : "passed"));
+    const thinkKey = `${S.currentEventIndex}:${p}`;
+    const row = el("div", { class: "row" + (r.counted ? "" : " uncounted"), style: who(p) },
+      el("span", { class: "dot" }),
+      el("div", { class: "main" },
+        el("div", { class: "top" }, el("span", { class: "name" }, pname(p)),
+          el("span", { class: "resp" }, r.response || "(no response)")),
+        r.explanation ? el("div", { class: "expl" }, r.explanation) : null,
+        r.error ? el("div", { class: "expl warn" }, `⚠ ${r.error}`) : null),
+      el("div", { class: "meta" },
+        el("span", { class: v.correct ? "ok" : "no" }, v.correct ? "✓ right" : "✗ wrong"), el("br"),
+        `${r.confidence}% · ${status}`, el("br"),
+        `${(r.latency_ms / 1000).toFixed(1)}s · ${((r.tokens && r.tokens.out) || 0).toLocaleString("en-US")} tok`));
+    row.append(thinkPanel(thinkKey));
+    box.append(row);
+  });
+  return box;
+}
+
+function thinkPanel(key) {
+  const d = el("details", { class: "think", "data-key": key, hidden: S.reasoningTried && !(S.reasoning && S.reasoning[key]) });
+  const sum = el("summary", {}, "Thinking");
+  const body = el("div", { class: "body" }, "Loading…");
+  d.append(sum, body);
+  if (S.reasoning && S.reasoning[key]) sum.textContent = `Thinking (${S.reasoning[key].kind})`;
+  d.addEventListener("toggle", async () => {
+    if (!d.open) return;
+    pause();
+    await loadReasoning();
+    const item = S.reasoning && S.reasoning[key];
+    if (!item) { body.textContent = "No reasoning was returned for this answer."; return; }
+    sum.textContent = `Thinking (${item.kind})`;
+    body.textContent = item.text;   // plain text only, never HTML
+  });
+  return d;
+}
+
+function renderFinal(step) {
+  const e = step.fin.e, q = S.log.questions[e.qid] || {};
+  const k = step.kind;
+  const card = el("div", { class: "card" });
+  if (k === "finalIntro") {
+    card.classList.add("splash");
+    card.append(el("h2", {}, "Final Jeopardy"), el("p", {}, `Category: ${e.subject}`),
+      e.skipped ? el("p", {}, "Nobody finished with a positive score, so there is no Final.") : null);
+    return card;
+  }
+  card.append(clueHead({ subject: e.subject }, q, el("span", { class: "tag" }, "Final Jeopardy")));
+  if (k === "finalWagers") {
+    card.append(el("div", { class: "splash" }, el("h2", {}, "Wagers locked"),
+      el("p", {}, e.qualifiers.map((p) => pname(p)).join(", ") + " have made their wagers")));
+    return card;
+  }
+  card.append(math(el("div", { class: "question" }, q.question || "")));
+  if (k === "read") {
+    const bar = el("div", { class: "readbar" + (S.playing ? " run" : "") }, el("i", { style: `animation-duration:${step.dur / S.speed}s` }));
+    card.append(bar);
+  }
+  if (k === "response" || k === "verdict") {
+    const r = e.replies[step.speaker];
+    const line = speech(r, step.speaker, k === "verdict");
+    if (k === "verdict") line.append(el("div", { class: "caption" }, `${pname(step.speaker)} wagered `,
+      el("strong", {}, money(e.wagers[step.speaker])),
+      e.wager_info[step.speaker] && e.wager_info[step.speaker].quip ? `  “${e.wager_info[step.speaker].quip}”` : ""));
+    card.append(line);
+  }
+  if (k === "reveal") card.append(renderReveal({ ...e, type: "final" }, q));
+  return card;
+}
+
+function renderEnd() {
+  const log = S.log, stats = gameStats(log);
+  const winners = log.result.winners.map(pname);
+  const card = el("div", { class: "card end" },
+    el("h2", {}, winners.length > 1 ? `Co-champions: ${winners.join(" & ")}` : `${winners[0]} wins`),
+    el("p", { class: "quip" }, "Final scores and how each model played. Sealed score counts every answer as if the model had buzzed."));
+  const head = ["Player", "Score", "Sealed score", "Accuracy", "Buzz rate", "Buzz accuracy", "Conf. right / wrong", "Failures"];
+  const table = el("table", {}, el("thead", {}, el("tr", {}, head.map((h) => el("th", {}, h)))),
+    el("tbody", {}, stats.slice().sort((a, b) => b.score - a.score).map((s) => el("tr", {},
+      el("td", {}, el("span", { class: "chip buzz", style: `--who:${s.color}` }, s.name), " ", el("span", { class: "pmodel" }, s.model)),
+      el("td", {}, money(s.score)), el("td", {}, money(s.sealed)), el("td", {}, pct(s.accuracy)),
+      el("td", {}, pct(s.buzzRate)), el("td", {}, pct(s.buzzAcc)),
+      el("td", {}, `${s.confR ?? "—"} / ${s.confW ?? "—"}`), el("td", {}, s.fails)))));
+  card.append(el("div", { class: "table-wrap" }, table));
+  const u = log.usage || {};
+  if (u.duration_s != null) card.append(el("p", { class: "pmodel" }, `Played in ${(u.duration_s / 60).toFixed(1)} min · dataset ${log.dataset.file} (${(log.dataset.sha256 || "").slice(0, 12)})`));
+  return card;
+}
+
+function renderPodiums(step) {
+  const box = $("#podiums");
+  box.replaceChildren();
+  const e = step.clue ? step.clue.e : step.fin ? step.fin.e : null;
+  S.log.players.forEach((pl, p) => {
+    const chips = [];
+    let cls = "podium";
+    let quip = "";
+    if (step.control === p && step.round !== "final" && step.kind !== "title" && step.kind !== "end") {
+      chips.push(el("span", { class: "chip ctl" }, "▸ board"));
+      if (step.kind === "pick" || step.kind === "roundIntro") cls += " control";
+    }
+    if (e && step.clue && ["buzz", "response", "verdict"].includes(step.kind) && !e.daily_double) {
+      const rank = e.buzz_order.indexOf(p);
+      const r = e.replies[p];
+      if (rank >= 0) chips.push(el("span", { class: "chip buzz" }, `#${rank + 1} buzz ${r.confidence}%`));
+      else chips.push(el("span", { class: "chip" }, r.error ? "⚠ no reply" : `pass ${r.confidence}%`));
+      if (rank < 0) cls += " dim";
+      if (r.quip) quip = r.quip;
+    }
+    if (e && step.clue && e.daily_double && ["wager", "read", "response", "verdict"].includes(step.kind)) {
+      if (e.dd.player !== p) cls += " dim";
+      else chips.push(el("span", { class: "chip buzz" }, `DD ${money(e.wager)}`));
+    }
+    if (step.fin && step.fin.e.qualifiers && !step.fin.e.skipped && step.kind !== "finalIntro") {
+      if (!step.fin.e.qualifiers.includes(p)) { cls += " dim"; chips.push(el("span", { class: "chip" }, "sits out")); }
+    }
+    if ((step.kind === "response" || step.kind === "verdict") && step.speaker === p) cls += " lit";
+    if (step.kind === "verdict" && step.speaker === p) {
+      const r = e.replies[p];
+      chips.push(el("span", { class: "chip " + (r.verdict.correct ? "ok" : "no") }, r.verdict.correct ? "✓" : "✗"));
+    }
+    if (step.kind === "end" && step.winners.includes(p)) chips.push(el("span", { class: "chip ctl" }, "★ champion"));
+    const s = step.scores[p];
+    const pod = el("div", { class: cls, style: `--who:${pl.color}` },
+      el("div", { class: "pname" }, pl.name),
+      el("div", { class: "pmodel" }, pl.model),
+      el("div", { class: "score" + (s < 0 ? " neg" : "") }, money(s)),
+      el("div", { class: "chips" }, chips),
+      el("div", { class: "quip" }, quip ? `“${quip}”` : ""));
+    if (step.kind === "verdict" && step.speaker === p) {
+      pod.append(el("span", { class: "delta " + (step.delta >= 0 ? "ok" : "no") }, (step.delta >= 0 ? "+" : "") + money(step.delta)));
+    }
+    box.append(pod);
+  });
+}
+
+/* ---------- playback ---------- */
+function schedule() {
+  clearTimeout(S.timer);
+  if (!S.playing) return;
+  const step = S.steps[S.i];
+  if (!step || step.kind === "end") { setPlaying(false); return; }
+  S.timer = setTimeout(() => goto(S.i + 1), (step.dur * 1000) / S.speed);
+}
+function goto(i) {
+  S.i = Math.max(0, Math.min(S.steps.length - 1, i));
+  const st = S.steps[S.i];
+  S.currentEventIndex = st.clue ? st.clue.ei : st.fin ? st.fin.ei : null;
+  render();
+  schedule();
+}
+function setPlaying(on) {
+  S.playing = on;
+  $("#playIcon").innerHTML = on ? ICON_PAUSE : ICON_PLAY;
+  $("#play").setAttribute("aria-label", on ? "Pause" : "Play");
+  if (on && S.steps[S.i] && S.steps[S.i].kind === "end") S.i = 0;
+  render();
+  schedule();
+}
+function pause() { if (S.playing) setPlaying(false); }
+const isAnchor = (s) => ["pick", "roundIntro", "finalIntro", "end", "title"].includes(s.kind);
+function nextClue() { for (let j = S.i + 1; j < S.steps.length; j++) if (isAnchor(S.steps[j])) return goto(j); }
+function prevClue() {
+  let j = S.i - 1;
+  while (j > 0 && !isAnchor(S.steps[j])) j--;
+  if (j === S.i - 1 && j > 0) { j--; while (j > 0 && !isAnchor(S.steps[j])) j--; }
+  goto(Math.max(0, j));
+}
+function replayClue(key) {
+  const j = S.steps.findIndex((s) => s.kind === "pick" && s.clue.key === key);
+  if (j >= 0) goto(j);
+}
+function jumpTargets() {
+  const t = [];
+  S.steps.forEach((s, i) => {
+    if (s.kind === "title") t.push([i, "Start"]);
+    if (s.kind === "roundIntro") t.push([i, S.log.rounds[s.round].name]);
+    if (s.kind === "finalIntro") t.push([i, "Final Jeopardy"]);
+    if (s.kind === "end") t.push([i, "Results"]);
+  });
+  return t;
+}
+function jumpValueFor(i) {
+  let v = 0;
+  for (const [j] of jumpTargets()) if (j <= i) v = j;
+  return String(v);
+}
+
+/* ---------- loading ---------- */
+async function loadReasoning() {
+  if (S.reasoningTried) return;
+  S.reasoningTried = true;
+  if (S.reasoning) return;
+  if (S.reasoningSrc) {
+    try { const r = await fetch(S.reasoningSrc); if (r.ok) S.reasoning = await r.json(); } catch (_) {}
+  }
+  if (!S.reasoning) document.querySelectorAll("details.think").forEach((d) => { if (!d.open) d.hidden = true; });
+}
+
+function start(log, reasoningSrc = null, reasoning = null) {
+  if (!log || !Array.isArray(log.events) || !Array.isArray(log.players)) throw new Error("This file is not a JeopardyBench game log.");
+  S.log = log;
+  S.steps = buildTimeline(log);
+  S.reasoning = reasoning; S.reasoningSrc = reasoningSrc; S.reasoningTried = !!reasoning;
+  $("#controls").hidden = false;
+  const jump = $("#jump");
+  jump.replaceChildren(...jumpTargets().map(([i, label]) => el("option", { value: i }, label)));
+  document.title = `${log.players.map((p) => p.name).join(" vs ")} · JeopardyBench`;
+  S.i = 0;
+  setPlaying(!new URLSearchParams(location.search).has("paused"));
+}
+
+function showLoader(message) {
+  $("#controls").hidden = true;
+  $("#podiums").replaceChildren();
+  $("#caption").textContent = "";
+  const box = el("div", { class: "loader", id: "loader" },
+    el("h2", {}, "Load a game"),
+    el("p", {}, "Drop a game log here (", el("code", {}, "games/<id>.json"), "), optionally together with its ",
+      el("code", {}, ".reasoning.json"), " file, or choose them."),
+    el("button", { class: "btn", onclick: () => $("#file").click() }, "Choose files…"),
+    el("p", {}, "Tip: serve the project folder (", el("code", {}, "python -m http.server"), ") and open ",
+      el("code", {}, "viewer.html?game=games/<id>.json"), "."),
+    message ? el("p", { class: "err" }, message) : null);
+  $("#stage").replaceChildren(box);
+}
+
+async function readFiles(files) {
+  let log = null, reasoning = null;
+  for (const f of files) {
+    try {
+      const obj = JSON.parse(await f.text());
+      if (obj && Array.isArray(obj.events)) log = obj; else reasoning = obj;
+    } catch (_) { /* ignore non-JSON */ }
+  }
+  if (log) { clearTimeout(S.timer); start(log, null, reasoning); }
+  else if (reasoning && S.log) { S.reasoning = reasoning; S.reasoningTried = true; render(); }
+  else showLoader("That file isn't a JeopardyBench game log.");
+}
+
+async function boot() {
+  const params = new URLSearchParams(location.search);
+  const src = params.get("game") || "game.json";
+  try {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error(`${src}: HTTP ${r.status}`);
+    start(await r.json(), src.replace(/\.json$/, ".reasoning.json"));
+  } catch (err) {
+    showLoader(params.get("game") ? `Couldn't load ${src} (${err.message}).` : null);
+  }
+}
+
+$("#play").addEventListener("click", () => setPlaying(!S.playing));
+$("#next").addEventListener("click", nextClue);
+$("#prev").addEventListener("click", prevClue);
+$("#open").addEventListener("click", () => $("#file").click());
+$("#file").addEventListener("change", (ev) => readFiles([...ev.target.files]));
+$("#jump").addEventListener("change", (ev) => goto(+ev.target.value));
+document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => {
+  S.speed = +b.dataset.speed;
+  document.querySelectorAll("[data-speed]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  render(); schedule();
+}));
+document.addEventListener("keydown", (ev) => {
+  if (!S.log || ev.target.closest("input, select, textarea")) return;
+  if (ev.key === " " && !ev.target.closest("button, summary")) { ev.preventDefault(); setPlaying(!S.playing); }
+  else if (ev.key === "ArrowRight") nextClue();
+  else if (ev.key === "ArrowLeft") prevClue();
+});
+document.addEventListener("dragover", (ev) => { ev.preventDefault(); const l = $("#loader"); if (l) l.classList.add("over"); });
+document.addEventListener("dragleave", () => { const l = $("#loader"); if (l) l.classList.remove("over"); });
+document.addEventListener("drop", (ev) => { ev.preventDefault(); readFiles([...ev.dataTransfer.files]); });
+
+window.JB = { buildTimeline, gameStats, start, goto, state: S };
+boot();
+</script>
+</body>
+</html>
