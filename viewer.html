@@ -332,8 +332,35 @@ function math(node) {
         { left: "$$", right: "$$", display: true }, { left: "\\[", right: "\\]", display: true },
         { left: "\\(", right: "\\)", display: false }, { left: "$", right: "$", display: false }] });
     } catch (_) { /* leave plain text */ }
+    fixMathVariants(node);
   }
   return node;
+}
+/* Chrome's MathML ignores mathvariant="double-struck" etc., so swap in the Unicode letters. */
+const DOUBLE = { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" };
+function variantChar(ch, variant) {
+  const c = ch.codePointAt(0);
+  const upper = c >= 65 && c <= 90, lower = c >= 97 && c <= 122, digit = c >= 48 && c <= 57;
+  if (variant === "double-struck") {
+    if (DOUBLE[ch]) return DOUBLE[ch];
+    if (upper) return String.fromCodePoint(0x1D538 + c - 65);
+    if (lower) return String.fromCodePoint(0x1D552 + c - 97);
+    if (digit) return String.fromCodePoint(0x1D7D8 + c - 48);
+  }
+  if (variant === "bold") {
+    if (upper) return String.fromCodePoint(0x1D400 + c - 65);
+    if (lower) return String.fromCodePoint(0x1D41A + c - 97);
+    if (digit) return String.fromCodePoint(0x1D7CE + c - 48);
+  }
+  return ch;
+}
+function fixMathVariants(root) {
+  root.querySelectorAll("math [mathvariant]").forEach((el) => {
+    const v = el.getAttribute("mathvariant");
+    if (v !== "double-struck" && v !== "bold") return;
+    el.querySelectorAll("*").length || (el.textContent = [...el.textContent].map((ch) => variantChar(ch, v)).join(""));
+    el.removeAttribute("mathvariant");
+  });
 }
 
 function roundName(step) {

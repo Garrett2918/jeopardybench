@@ -4,6 +4,10 @@ AI models play Jeopardy on [Humanity's Last Exam](https://huggingface.co/dataset
 
 ![The board mid-game: six HLE subjects, DeepSeek picks Chemistry for $400](docs/images/board.png)
 
+HLE questions take a specialist minutes to read. This one asks for the closed walks of length 4 in a 13-vertex Paley graph. DeepSeek buzzes first at 80% and answers 1296. Gemini buzzes second at 67% and gets 1482. Luna also has 1482 but passes at 51%.
+
+![A Mathematics clue for $800 about closed walks in a Paley graph, with DeepSeek and Gemini buzzing](docs/images/question.png)
+
 Every model answers every clue in private and states a confidence from 0 to 100. Models that choose to buzz line up by confidence. The first buzzer gets judged: a right answer wins the clue's value, a wrong one loses it, and the next buzzer gets a turn. A model that passes risks nothing.
 
 That rule rewards a model for knowing what it doesn't know. In our first games, Gemini 3.8 Flash and DeepSeek v4.1 Flash each got 40% of the clues right. Gemini finished $4,000 ahead because it passed when unsure. DeepSeek buzzed on 97% of clues.
@@ -17,15 +21,13 @@ That rule rewards a model for knowing what it doesn't know. In our first games, 
 3. The engine ranks buzzers by confidence, with ties going to the faster reply.
 4. The judge grades each answer, including the ones that never counted, so the log holds every model's answer to every clue.
 
-![Two models buzz on a clue: Gemini first at 87%, Luna second at 58%. DeepSeek passes at 34%](docs/images/buzz.png)
-
 A game also has Daily Doubles (the model in control wagers before seeing the clue) and Final Jeopardy (everyone above $0 wagers on one last clue).
 
 **Grading.** For multiple choice, a response that names one valid option by its letter or its exact text gets graded by letter, with no model call. On our first two games that covered 51 of 59 multiple-choice answers and agreed with the judge every time. For exact answers, two judge calls vote and a third breaks a tie.
 
-![The reveal: the correct response, the author's rationale, and every model's answer with its explanation, confidence, time and tokens](docs/images/reveal.png)
+![The reveal: the correct response, every model's answer with its explanation and confidence, and DeepSeek's thinking showing where it went wrong](docs/images/reveal.png)
 
-The clue screenshots above come from a mock game with made-up questions. HLE asks you to keep its questions out of public places so they stay out of AI training data, so this repo never commits game logs or real clue text.
+The Paley graph clue is invented, and so are the models' answers to it. HLE asks you to keep its questions out of public places so they stay out of AI training data, so this repo never commits game logs or real clue text. The board and results screenshots come from a real game and show only subjects and scores. `tools/screenshots.py` regenerates every picture.
 
 ## Setup
 
@@ -103,5 +105,6 @@ jeopardybench/
   game.py         game rules
   mock.py         offline players and judge
   log.py          game log types
+tools/screenshots.py  regenerate the README pictures
 docs/             design spec, plan, screenshots
 ```
